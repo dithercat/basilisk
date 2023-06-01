@@ -1,0 +1,7 @@
+{
+    "tokenizer": "/home/example/models/vicuna-13b-4bit-128g/tokenizer.model",
+    "config": "/home/example/models/vicuna-13b-4bit-128g/config.json",
+    "model": "/home/example/models/vicuna-13b-4bit-128g/vicuna-13b-4bit-128g.safetensors",
+
+    "shared_secret": "PLEASE CHANGE ME"
+}

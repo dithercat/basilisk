@@ -15,6 +15,8 @@ class ExLlamaGenerator:
         token_repetition_penalty_sustain = 256  # No. most recent tokens to repeat penalty for, -1 to apply to whole context
         token_repetition_penalty_decay = 128  # Gradually decrease penalty over this many tokens
 
+        token_penalized_penalty = 1.15
+
         beams = 1
         beam_length = 1
 
@@ -27,6 +29,8 @@ class ExLlamaGenerator:
     max_beam_length: int
     in_beam_search: True
     disallowed_tokens: list[int] or None
+
+    penalized_tokens: list[int] or None
 
     def __init__(self, model, tokenizer, cache):
 
@@ -64,6 +68,9 @@ class ExLlamaGenerator:
 
         if self.disallowed_tokens is not None:
             logits[self.disallowed_tokens] = float("-inf")
+
+        if self.penalized_tokens is not None:
+            logits[self.penalized_tokens] /= float(self.settings.token_penalized_penalty)
 
         # Base probabilities
 
@@ -103,6 +110,11 @@ class ExLlamaGenerator:
     def disallow_tokens(self, tokens):
 
         self.disallowed_tokens = tokens
+
+
+    def penalize_tokens(self, tokens):
+
+        self.penalized_tokens = tokens
 
 
     def gen_begin(self, in_tokens):

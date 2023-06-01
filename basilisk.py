@@ -9,8 +9,6 @@ import glob
 import json
 from flask import Flask, request
 
-print("The system is coming up. Please wait.")
-
 torch.set_grad_enabled(False)
 torch.cuda._lazy_init()
 
@@ -30,12 +28,13 @@ parser.add_argument("-s", "--stream", type = int, help = "Stream layer interval"
 parser.add_argument("-gs", "--gpu_split", type = str, help = "Comma-separated list of VRAM (in GB) to use per GPU device for model layers, e.g. -gs 20,7,7")
 parser.add_argument("-dq", "--dequant", type = str, help = "Number of layers (per GPU) to de-quantize at load time")
 
-parser.add_argument("-temp", "--temperature", type = float, help = "Temperature", default = 0.95)
-parser.add_argument("-topk", "--top_k", type = int, help = "Top-K", default = 20)
-parser.add_argument("-topp", "--top_p", type = float, help = "Top-P", default = 0.65)
+parser.add_argument("-temp", "--temperature", type = float, help = "Temperature", default = 0.5)
+parser.add_argument("-topk", "--top_k", type = int, help = "Top-K", default = 32)
+parser.add_argument("-topp", "--top_p", type = float, help = "Top-P", default = 0.2)
 parser.add_argument("-minp", "--min_p", type = float, help = "Min-P", default = 0.00)
-parser.add_argument("-repp",  "--repetition_penalty", type = float, help = "Repetition penalty", default = 1.15)
-parser.add_argument("-repps", "--repetition_penalty_sustain", type = int, help = "Past length for repetition penalty", default = 256)
+parser.add_argument("-repp",  "--repetition_penalty", type = float, help = "Repetition penalty", default = 1.1)
+parser.add_argument("-repps", "--repetition_penalty_sustain", type = int, help = "Past length for repetition penalty", default = 32)
+parser.add_argument("-repdc", "--repetition_penalty_decay", type = int, help = "Decay length for repetition penalty", default = 64)
 parser.add_argument("-beams", "--beams", type = int, help = "Number of beams for beam search", default = 1)
 parser.add_argument("-beamlen", "--beam_length", type = int, help = "Number of future tokens to consider", default = 1)
 
@@ -64,6 +63,7 @@ config.update({
     "min_p": cargs.min_p,
     "repetition_penalty": cargs.repetition_penalty,
     "repetition_penalty_sustain": cargs.repetition_penalty_sustain,
+    "repetition_penalty_decay": cargs.repetition_penalty_decay,
     "beams": cargs.beams,
     "beam_length": cargs.beam_length,
     "gpu_peer_fix": cargs.gpu_peer_fix
@@ -126,7 +126,7 @@ generator.settings.top_p = config["top_p"]
 generator.settings.min_p = config["min_p"]
 generator.settings.token_repetition_penalty_max = config["repetition_penalty"]
 generator.settings.token_repetition_penalty_sustain = config["repetition_penalty_sustain"]
-generator.settings.token_repetition_penalty_decay = generator.settings.token_repetition_penalty_sustain // 2
+generator.settings.token_repetition_penalty_decay = config["repetition_penalty_decay"]
 generator.settings.beams = config["beams"]
 generator.settings.beam_length = config["beam_length"]
 
@@ -185,30 +185,39 @@ def post_infer():
         return "unauthorized", 403
     
     body = {
-        "max_new_tokens": 256,
-        "temperature": 0.5,
-        "top_p": 0.15,
-        "top_k": 32,
-        "repetition_penalty": 1.25,
         "min_length": 4,
-        "stopping_strings": ["\n"]
+        "max_new_tokens": 256,
+        "stopping_strings": ["\n"],
+
+        # providing the last inference here attempts to prevent any token from
+        # being generated at the same position as in the previous sequence
+        "positional_repeat_penalty": 1.3,
+        "positional_repeat_inhibit": []
     }
+    body.update(config)
     body.update(request.get_json())
 
     if body["prompt"] == None:
         return "prompt required", 400
-    
+
     # update settings
     generator.settings.temperature = body["temperature"]
     generator.settings.top_k = body["top_k"]
     generator.settings.top_p = body["top_p"]
+    generator.settings.min_p = body["min_p"]
     generator.settings.token_repetition_penalty_max = body["repetition_penalty"]
+    generator.settings.token_repetition_penalty_sustain = body["repetition_penalty_sustain"]
+    generator.settings.token_repetition_penalty_decay = body["repetition_penalty_decay"]
+    generator.settings.token_penalized_penalty = body["positional_repeat_penalty"]
     
     # tokenize stopping strings
     stopping_strings_tok = []
     for string in body["stopping_strings"]:
         toked = tokenizer.tokenizer.Encode(string)[1:]
         stopping_strings_tok.append(toked)
+    
+    # tokenize positional inhibit
+    pr_toks = body["positional_repeat_inhibit"]
     
     ids = torch.tensor([tokenize_evil(body["prompt"])])
 
@@ -219,6 +228,12 @@ def post_infer():
     generator.begin_beam_search()
 
     for i in range(body["max_new_tokens"]):
+        # penalize inference repeats from last turn
+        if i < len(pr_toks):
+            generator.penalize_tokens([pr_toks[i]])
+        else:
+            generator.penalize_tokens(None)
+
         # Disallowing the end condition tokens seems like a clean way to force longer replies.
         if i < body["min_length"]:
             generator.disallow_tokens([
@@ -245,7 +260,8 @@ def post_infer():
             generator.replace_last_token(newline_tok)
             break
     
-    text = tokenizer.decode(generator.sequence[0][initial_len:])
+    tokens = generator.sequence[0][initial_len:]
+    text = tokenizer.decode(tokens)
 
     # clean up stopping strings
     # this sucks
@@ -258,6 +274,9 @@ def post_infer():
             continue
         break
 
-    return { "text": text }
+    return {
+        "text": text,
+        "tokens": tokens.tolist()
+    }
 
 app.run(threaded=False)

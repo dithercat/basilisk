@@ -13,17 +13,31 @@ tiny LLaMA inference server
 
 ## notes
 
-- HACK: BOS and EOS are internally encoded as STX and ETX (`\x02` and `\x03`
-  respectively) and converted to their actual representations after tokenizing
-  - you can use the `special_convert` parameter to lazily replace literal `<s>`
-    and `</s>` with their counterparts, but this isnt recommended
-  - keep in mind that tokens generally have any spaces in the *front*, and
-    HF Transformers tokenizers (*not* basilisk) usually eat whitespace
-    surrounding these tokens. basilisk, on the other hand, treats STX/ETX as a
-    literal BOS/EOS, and does no preprocessing to make it friendlier for the
-    model
-    - GOOD: `"ASSISTANT:<s> Hello,"` (tokenizes as `[..., ":", "<s>", " Hello", ","]`)
-    - BAD: `"ASSISTANT: <s>Hello, "` (tokenizes as `[..., ":", " ", "<s>", "Hello", ",", " "]`)
+- this doesnt take advantage of ExLlama's excellent caching stuff because it's
+  intended for use in multiple channels at the same time
+- `BOS` and `EOS` are encoded as control characters `STX` and `ETX` (`\x02` and
+  `\x03` respectively) and converted to their actual representations after
+  tokenizing
+  - most instruct models behave best when a `BOS` is placed in the simulacrum's
+    input line
+    - example prompt: `"USER: tell me something interesting\nASSISTANT:\x02"`
+  - you can use the `special_convert` parameter to lazily replace literal
+    `<s>`/`</s>` with `BOS`/`EOS`
+    - example prompt: `"USER: tell me something interesting\nASSISTANT:<s>"`
+    - this isnt recommended (it makes it trivial for a user to inject these
+      special tokens among other things). instead, write your client app to use
+      `STX`/`ETX` if they are needed
+  - **IMPORTANT**: keep in mind that tokens generally have spaces (if any) in
+    the *front*, and HF Transformers tokenizers (*not* basilisk) usually eat
+    whitespace surrounding special tokens. basilisk treats `STX`/`ETX` in-place
+    as a literal `BOS`/`EOS` (by directly mapping tokens `5 -> 1` and `6 -> 2`),
+    and does no preprocessing to make it friendlier for the model. this seems
+    small, but it's crucial to getting good output
+    - **GOOD**: `"ASSISTANT:\x02 Hello,"`
+      (tokenizes as `[..., ":", "<s>", " Hello", ","]`)
+    - **BAD**: `"ASSISTANT: \x02Hello, "`
+      (tokenizes as `[..., ":", " ", "<s>", "Hello", ",", " "]`,
+      caused incoherence in testing with a Vicuna finetune)
 
 # ExLlama
 

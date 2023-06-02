@@ -249,8 +249,14 @@ def post_infer():
         toked = tokenizer.tokenizer.Encode(string)[1:]
         stopping_strings_tok.append(toked)
     
-    # tokenize positional inhibit
-    pr_toks = body["positional_repeat_inhibit"]
+    # build positional inhibit lists
+    pr_toks = []
+    for seq in body["positional_repeat_inhibit"]:
+        for i in range(len(seq)):
+            if i == len(pr_toks):
+                pr_toks.append([seq[i]])
+            else:
+                pr_toks[i].append(seq[i])
     
     ids = torch.tensor([tokenize_evil(prompt, body["special_convert"])])
 
@@ -263,7 +269,7 @@ def post_infer():
     for i in range(body["max_new_tokens"]):
         # penalize inference repeats from last turn
         if i < len(pr_toks):
-            generator.penalize_tokens([pr_toks[i]])
+            generator.penalize_tokens(pr_toks[i])
         else:
             generator.penalize_tokens(None)
 

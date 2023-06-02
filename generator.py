@@ -51,6 +51,7 @@ class ExLlamaGenerator:
         self.max_beam_length = 0
         self.in_beam_search = False
         self.disallowed_tokens = None
+        self.penalized_tokens = None
 
 
     def make_rep_mask(self, penalty_max, sustain, decay):

@@ -132,13 +132,14 @@ generator.settings.token_repetition_penalty_decay = config["repetition_penalty_d
 generator.settings.beams = config["beams"]
 generator.settings.beam_length = config["beam_length"]
 
-# HACK: replace literal <s> and </s> with STX and ETX
+# HACK: optionally replace literal <s> and </s> with STX and ETX
 #       and then replace STX and ETX with BOS and EOS
 bos_tok = tokenizer.tokenizer.Encode("\x02")[1]
 eos_tok = tokenizer.tokenizer.Encode("\x03")[1]
-def tokenize_evil(str):
-    ids = tokenizer.tokenizer.Encode(
-        str.replace("<s>", "\x02").replace("</s>", "\x03"))
+def tokenize_evil(str, special_convert=False):
+    if special_convert:
+        str = str.replace("<s>", "\x02").replace("</s>", "\x03")
+    ids = tokenizer.tokenizer.Encode(str)
     for i in range(0, len(ids)):
         if ids[i] == bos_tok:
             ids[i] = tokenizer.bos_token_id
@@ -194,10 +195,11 @@ def post_tokens():
         return "unauthorized", 403
     
     body = request.get_json()
-    if body["prompt"] == None:
+    prompt = body.get("prompt")
+    if prompt == None:
         return "prompt required", 400
     
-    ids = tokenize_evil(body["prompt"])
+    ids = tokenize_evil(prompt, body.get("special_convert"))
     return {
         "tokens": ids
     }
@@ -218,12 +220,17 @@ def post_infer():
         # providing the last inference here attempts to prevent any token from
         # being generated at the same position as in the previous sequence
         "positional_repeat_penalty": 1.2,
-        "positional_repeat_inhibit": []
+        "positional_repeat_inhibit": [],
+
+        # convert "<s>" and "</s>"?
+        # you should avoid this if possible by using STX and ETX in your app
+        "special_convert": False
     }
     body.update(config)
     body.update(request.get_json())
 
-    if body["prompt"] == None:
+    prompt = body.get("prompt")
+    if prompt == None:
         return "prompt required", 400
 
     # update settings
@@ -245,7 +252,7 @@ def post_infer():
     # tokenize positional inhibit
     pr_toks = body["positional_repeat_inhibit"]
     
-    ids = torch.tensor([tokenize_evil(body["prompt"])])
+    ids = torch.tensor([tokenize_evil(prompt, body["special_convert"])])
 
     # begin inference
     generator.gen_begin(ids)

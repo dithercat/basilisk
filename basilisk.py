@@ -232,6 +232,7 @@ def post_infer():
     prompt = body.get("prompt")
     if prompt == None:
         return "prompt required", 400
+    prompt = prompt.strip()
 
     # update settings
     generator.settings.temperature = body["temperature"]

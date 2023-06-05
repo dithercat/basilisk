@@ -71,6 +71,7 @@ generator.settings.beam_length = args.beam_length
 #       and then replace STX and ETX with BOS and EOS
 bos_tok = tokenizer.tokenizer.Encode("\x02")[1]
 eos_tok = tokenizer.tokenizer.Encode("\x03")[1]
+colon_tok = tokenizer.tokenizer.Encode(":")[0]
 def tokenize_evil(str, special_convert=False):
     if special_convert:
         str = str.replace("<s>", "\x02").replace("</s>", "\x03")
@@ -130,8 +131,14 @@ def post_tokens():
         return "prompt required", 400
     
     ids = tokenize_evil(prompt, body.get("special_convert"))
+
+    frags = []
+    for id in ids:
+        frags.append(tokenizer.tokenizer.Decode([colon_tok, id])[1:])
+
     return {
-        "tokens": ids
+        "tokens": ids,
+        "fragments": frags
     }
 
 # actual inference endpoint
@@ -189,9 +196,13 @@ def post_infer():
             else:
                 pr_toks[i].append(seq[i])
     
-    ids = torch.tensor([tokenize_evil(prompt, body["special_convert"])])
+    idsl = tokenize_evil(prompt, body["special_convert"])
+    print("context: {length}, limit: {limit}".format(limit=body["max_new_tokens"], length=len(idsl)))
+    if len(idsl) + body["max_new_tokens"] >= 2048:
+        return "prompt length and generation limit must be less than 2048", 400
 
     # begin inference
+    ids = torch.tensor([idsl])
     generator.gen_begin(ids)
     initial_len = generator.sequence[0].shape[0]
 
@@ -250,6 +261,8 @@ def post_infer():
         else:
             continue
         break
+    
+    print("generated {length} tokens".format(length=len(tokens.tolist())))
 
     return {
         "text": text,

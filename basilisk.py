@@ -7,6 +7,7 @@ import torch
 import os
 import json
 from flask import Flask, request
+from sentence_transformers import SentenceTransformer
 
 torch.set_grad_enabled(False)
 torch.cuda._lazy_init()
@@ -41,7 +42,7 @@ model_init.get_model_files(args)
 
 # Some feedback
 
-print(f" -- the system is coming up. please wait. ^^")
+print(f"the system is coming up. please wait. ^^")
 print(f" -- tokenizer: {args.tokenizer}")
 print(f" -- model config: {args.config}")
 print(f" -- model: {args.model}")
@@ -68,6 +69,14 @@ generator.settings.token_repetition_penalty_decay = generator.settings.token_rep
 generator.settings.beams = args.beams
 generator.settings.beam_length = args.beam_length
 
+print("ExLlama initialized!")
+
+# init SentenceTransformers
+embedder = None
+if args.embedding_model != None:
+    embedder = SentenceTransformer(args.embedding_model)
+    print("SentenceTransformer initialized!")
+
 # HACK: optionally replace literal <s> and </s> with STX and ETX
 #       and then replace STX and ETX with BOS and EOS
 bos_tok = tokenizer.tokenizer.Encode("\x02")[1]
@@ -92,20 +101,23 @@ def auth_check():
     secret = args.__dict__.get("shared_secret")
     return secret != None and request.headers.get("authorization") != secret
 
+def err(str, code):
+    return { "error": str }, code
+
 # dedicated "see if the config is working" endpoint
 # maps to kasumiLLM's ping()
 # (which used to be a hack using textgen-webui token count endpoint)
 @app.route("/basilisk/ping")
 def get_ping():
     if auth_check():
-        return "unauthorized", 403
+        return err("unauthorized", 403)
     return "pong"
 
 # allow clients to retrieve most of the base config
 @app.route("/basilisk/config")
 def get_config():
     if auth_check():
-        return "unauthorized", 403
+        return err("unauthorized", 403)
     
     cfg = {}
     cfg.update(args.__dict__)
@@ -119,17 +131,38 @@ def get_config():
 
     return cfg
 
+# generate embeddings for a string using SentenceTransformer
+@app.route("/basilisk/embed", methods=["POST"])
+def post_embed():
+    if auth_check():
+        return err("unauthorized", 403)
+    
+    if embedder == None:
+        return err("embedding model not loaded", 501)
+    
+    body = request.get_json()
+    prompt = body.get("prompt")
+    if prompt == None:
+        return err("prompt required", 400)
+
+    embedding = embedder.encode(prompt).tolist()
+
+    return {
+        "embedding": embedding,
+        "dimensions": len(embedding)
+    }
+
 # tokenize a string
 # primary use is to get token count, but also for positional_repeat_inhibit
 @app.route("/basilisk/tokenize", methods=["POST"])
 def post_tokens():
     if auth_check():
-        return "unauthorized", 403
+        return err("unauthorized", 403)
     
     body = request.get_json()
     prompt = body.get("prompt")
     if prompt == None:
-        return "prompt required", 400
+        return err("prompt required", 400)
     
     ids = tokenize_evil(prompt, body.get("special_convert"))
 
@@ -147,7 +180,7 @@ def post_tokens():
 @app.route("/basilisk/infer", methods=["POST"])
 def post_infer():
     if auth_check():
-        return "unauthorized", 403
+        return err("unauthorized", 403)
     
     # get parameters+overrides
     body = {
@@ -169,7 +202,7 @@ def post_infer():
 
     prompt = body.get("prompt")
     if prompt == None:
-        return "prompt required", 400
+        return err("prompt required", 400)
     prompt = prompt.strip()
 
     # update settings
@@ -200,7 +233,7 @@ def post_infer():
     idsl = tokenize_evil(prompt, body["special_convert"])
     print("context: {length}, limit: {limit}".format(limit=body["max_new_tokens"], length=len(idsl)))
     if len(idsl) + body["max_new_tokens"] >= 2048:
-        return "prompt length and generation limit must be less than 2048", 400
+        return err("prompt length and generation limit must be less than 2048", 400)
 
     # begin inference
     ids = torch.tensor([idsl])
@@ -269,5 +302,7 @@ def post_infer():
         "text": text,
         "tokens": tokens.tolist()
     }
+
+print("starting flask...")
 
 app.run(threaded=False)

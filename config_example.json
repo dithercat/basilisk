@@ -3,5 +3,7 @@
     "config": "/home/example/models/vicuna-13b-4bit-128g/config.json",
     "model": "/home/example/models/vicuna-13b-4bit-128g/vicuna-13b-4bit-128g.safetensors",
 
+    "embedding_model": "all-MiniLM-L6-v2",
+
     "shared_secret": "PLEASE CHANGE ME"
 }

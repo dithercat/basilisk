@@ -1,14 +1,18 @@
 # basilisk
 
-tiny LLaMA inference server
+tiny LLaMA inference server (also provides an endpoint for embedding with
+SentenceTransformers)
 
 ## setup
 
-1. follow the original ExLlama `README.md`, other than installing `flask` for
-   the http server
+1. follow the [original ExLlama readme](#exllama), other than installing Flask
+   and [SentenceTransformers](https://www.sbert.net/docs/installation.html)
 2. create a `config.json` (see `config_example.json`)
    - `shared_secret` is optional; if set, the `Authorization` header of all
      requests will be checked against this
+   - `embedding_model` enables the `/basilisk/embed` endpoint. select a model
+     from [this list](https://www.sbert.net/docs/pretrained_models.html).
+     setting it to `null` disables the endpoint (it will always return 501)
 3. just run `basilisk.py`
 
 ## notes
@@ -28,16 +32,112 @@ tiny LLaMA inference server
       special tokens among other things). instead, write your client app to use
       `STX`/`ETX` if they are needed
   - **IMPORTANT**: keep in mind that tokens generally have spaces (if any) in
-    the *front*, and HF Transformers tokenizers (*not* basilisk) usually eat
-    whitespace surrounding special tokens. basilisk treats `STX`/`ETX` in-place
-    as a literal `BOS`/`EOS` (by directly mapping tokens `5 -> 1` and `6 -> 2`),
-    and does no preprocessing to make it friendlier for the model. this seems
+    the *front*, and HF Tokenizers (*not* basilisk) usually eat whitespace
+    surrounding special tokens. basilisk treats `STX`/`ETX` in-place as a
+    literal `BOS`/`EOS` (by directly mapping tokens `5 -> 1` and `6 -> 2`), and
+    does no preprocessing to make it friendlier for the model. this seems
     small, but it's crucial to getting good output
     - **GOOD**: `"ASSISTANT:\x02 Hello,"`
       (tokenizes as `[..., ":", "<s>", " Hello", ","]`)
     - **BAD**: `"ASSISTANT: \x02Hello, "`
       (tokenizes as `[..., ":", " ", "<s>", "Hello", ",", " "]`,
       caused incoherence in testing with a Vicuna finetune)
+
+## endpoints
+
+- `GET /basilisk/ping` - 
+  intended to verify that the client app's config is correct, and that the
+  basilisk server is reachable.
+
+  simply returns the text `pong`.
+
+- `GET /basilisk/config` -
+  returns a JSON object containing most config keys, not including paths and
+  secrets.
+
+- `POST /basilisk/embed` -
+  computes an embedding using SentenceTransformers.
+
+  accepts a JSON object in the form:
+  ```typescript
+  interface basiliskEmbedArguments {
+      prompt: string
+  }
+  ```
+
+  returns a JSON object in the form:
+  ```typescript
+  interface basiliskEmbedResult {
+      embedding: number[]
+  }
+  ```
+
+- `POST /basilisk/tokenize` -
+  tokenizes a string; primarily useful for counting tokens.
+
+  accepts a JSON object in the form:
+  ```typescript
+  interface basiliskTokenizeArguments {
+      prompt: string
+  }
+  ```
+
+  returns a JSON object in the form:
+  ```typescript
+  interface basiliskTokenizeResult {
+      tokens: number[],
+
+      // the string representations of the tokens
+      fragments: string[]
+  }
+  ```
+
+- `POST /basilisk/infer` -
+  generates text from a prompt (hard-limited to 2048 tokens for now).
+
+  accepts a JSON object in the form:
+  ```typescript
+  interface basiliskInferenceArguments {
+      prompt: string,
+
+      // the usual sampling arguments
+      temperature?: number,
+      top_k?: number,
+      top_p?: number,
+      min_p?: number,
+
+      // stopping criteria
+      min_length?: number,
+      max_new_tokens?: number,
+      stopping_strings?: string[],
+
+      // base presence(?) penalty 
+      token_repetition_penalty_max?: number,
+      // maintain penalty over this many tokens
+      token_repetition_penalty_sustain?: number,
+      // after sustain period, decay over this many tokens
+      token_repetition_penalty_decay?: number,
+
+      // providing an array of token sequences from previous inferences here
+      // penalizes repetitive patterns utilizing the same token at the same
+      // position as previous inferences
+      positional_repeat_inhibit?: number[][],
+      // base positional repeat penalty
+      positional_repetition_penalty?: number,
+
+      // convert <s> to STX and </s> to ETX?
+      // you should avoid this if possible by using STX and ETX directly
+      special_convert?: boolean
+  }
+  ```
+
+  returns a JSON object in the form:
+  ```typescript
+  interface basiliskInferenceResult {
+      text: string,
+      tokens: number[]
+  }
+  ```
 
 # ExLlama
 

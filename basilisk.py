@@ -36,6 +36,7 @@ if os.path.exists("config.json"):
     with open("config.json", "rb") as f:
         args.__dict__.update(json.load(f))
 
+model_init.post_parse(args)
 model_init.get_model_files(args)
 
 # Some feedback

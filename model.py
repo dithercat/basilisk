@@ -120,11 +120,11 @@ def _dump_tensor(t, name):
 
 # 4-bit linear layer implementation
 
-#class Ex4bitLinear:
-class Ex4bitLinear(nn.Module):
+class Ex4bitLinear:
+# class Ex4bitLinear(nn.Module):
 
     def __init__(self, config, in_features, out_features, has_bias, tensors, key):
-        super().__init__()
+        # super().__init__()
 
         self.config = config
         self.key = key
@@ -192,11 +192,11 @@ class Ex4bitLinear(nn.Module):
 
 # Llama MLP
 
-# class ExLlamaMLP:
-class ExLlamaMLP(nn.Module):
+class ExLlamaMLP:
+# class ExLlamaMLP(nn.Module):
 
     def __init__(self, config, tensors, key):
-        super().__init__()
+        # super().__init__()
 
         self.config = config
 
@@ -219,11 +219,11 @@ class ExLlamaMLP(nn.Module):
 
 # RMS Layer norm.
 
-# class ExLlamaRMSNorm:
-class ExLlamaRMSNorm(nn.Module):
+class ExLlamaRMSNorm:
+# class ExLlamaRMSNorm(nn.Module):
 
     def __init__(self, config, tensors, key):
-        super().__init__()
+        # super().__init__()
 
         self.config = config
         self.variance_epsilon = self.config.rms_norm_eps
@@ -243,11 +243,11 @@ class ExLlamaRMSNorm(nn.Module):
 
 # Llama attention
 
-# class ExLlamaAttention:
-class ExLlamaAttention(nn.Module):
+class ExLlamaAttention:
+# class ExLlamaAttention(nn.Module):
 
     def __init__(self, config, tensors, key, sin, cos, index):
-        super().__init__()
+        # super().__init__()
 
         self.config = config
         self.sin = sin
@@ -299,7 +299,7 @@ class ExLlamaAttention(nn.Module):
 
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))
             attn_weights /= math.sqrt(self.config.head_dim)
-            if buffer.attn_mask.shape[2] > 1: attn_weights = attn_weights + buffer.attn_mask
+            if buffer.attn_mask is not None and buffer.attn_mask.shape[2] > 1: attn_weights = attn_weights + buffer.attn_mask
             # attn_weights = torch.max(attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min))
             attn_weights = nn.functional.softmax(attn_weights, dim = -1, dtype = torch.float16).to(query_states.dtype)
             attn_output = torch.matmul(attn_weights, value_states)
@@ -311,10 +311,9 @@ class ExLlamaAttention(nn.Module):
 
             # Torch's SDP attention has a built-in causal mask feature which we can use only when there is no past, i.e.
             # it can only apply a square attention mask. It saves quite a bit of VRAM but in practice Torch seems to use
-            # the same amount of memory at peak anyway. It's also a little slower, and it gives misleading benchmarks
-            # since it doesn't actually apply in the case we're interested in (autoregression.) Disabled for now.
+            # the same amount of memory at peak anyway.
 
-            if True or past_len > 0:
+            if past_len > 0:
                 attn_output = F.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask = buffer.attn_mask, is_causal = False)
             else:
                 attn_output = F.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask = None, is_causal = True)
@@ -334,11 +333,11 @@ def _rows(x):
     for y in x.shape[:-1]: xdp *= y
     return xdp
 
-# class ExLlamaDecoderLayer:
-class ExLlamaDecoderLayer(nn.Module):
+class ExLlamaDecoderLayer:
+# class ExLlamaDecoderLayer(nn.Module):
 
     def __init__(self, config, tensors, key, index, sin, cos):
-        super().__init__()
+        # super().__init__()
 
         self.config = config
         self.index = index
@@ -543,7 +542,7 @@ class ExLlamaBuffer:
     def to(self, device):
 
         new = ExLlamaBuffer(self.config)
-        new.attn_mask = _move_tensor(self.attn_mask, device, "attn_mask", self.config)
+        new.attn_mask = None if self.attn_mask is None else _move_tensor(self.attn_mask, device, "attn_mask", self.config)
         return new
 
 
@@ -588,12 +587,12 @@ def _move_tensor(tensor, new_device, name, config):
     return tensor.to(new_device)
 
 
-# class ExLlama:
-class ExLlama(nn.Module):
+class ExLlama:
+# class ExLlama(nn.Module):
 
     def __init__(self, config):
-        super().__init__()
-        self.eval()
+        # super().__init__()
+        # self.eval()
 
         self.config = config
 
@@ -761,8 +760,8 @@ class ExLlama(nn.Module):
 
             modules.append(layer)
 
-        # self.layers = modules
-        self.layers = nn.ModuleList(modules)
+        self.layers = modules
+        # self.layers = nn.ModuleList(modules)
 
         # Prepare CUDA buffers
 
@@ -774,18 +773,18 @@ class ExLlama(nn.Module):
 
             temp_state = torch.zeros((config.max_seq_len, config.intermediate_size), dtype = torch.float16, device = dev)
             temp_mlp = torch.zeros((config.fused_mlp_thd * 2, config.intermediate_size), dtype = torch.float16, device = dev)
-            temp_rms_norm = torch.zeros((1, config.max_seq_len), dtype = torch.float32, device = dev)
+            temp_zeros_float = torch.zeros((1, 65536), dtype = torch.float32, device = dev)
             temp_dq = torch.zeros((1, max_dq_buffer_size), dtype = torch.float16, device = dev)
 
             device_buffers["temp_state"] = temp_state
             device_buffers["temp_mlp"] = temp_mlp
-            device_buffers["temp_rms_norm"] = temp_rms_norm
+            device_buffers["temp_zeros_float"] = temp_zeros_float
             device_buffers["temp_dq"] = temp_dq
 
             cuda_ext.exllama_ext.prepare_buffers(torch.device(dev),
                                                  temp_state,
                                                  temp_mlp,
-                                                 temp_rms_norm,
+                                                 temp_zeros_float,
                                                  temp_dq)
 
 
@@ -810,14 +809,11 @@ class ExLlama(nn.Module):
             attn_mask = torch.zeros(batch_size, 1, seq_len, past_len + seq_len, dtype = torch.float16, device = devs[0])
             attn_mask_triu = torch.triu(torch.full((seq_len - 1, seq_len - 1), torch.finfo(torch.float16).min))
             attn_mask[:, :, : seq_len - 1, past_len + 1: past_len + seq_len] = attn_mask_triu
-            # attn_mask = torch.ones(batch_size, 1, seq_len, past_len + seq_len, dtype = torch.bool, device = devs[0])
-            # attn_mask_triu = ~torch.triu(torch.ones((seq_len - 1, seq_len - 1), dtype = torch.bool), diagonal = 0)
-            # attn_mask[:, :, : seq_len - 1, past_len + 1: past_len + seq_len] = attn_mask_triu
 
         else:
 
-            attn_mask = torch.zeros(batch_size, 1, seq_len, seq_len + past_len, dtype = torch.float16, device = devs[0])
-            # attn_mask = torch.ones(batch_size, 1, seq_len, seq_len + past_len, dtype = torch.bool, device = devs[0])
+            attn_mask = None
+            # attn_mask = torch.zeros(batch_size, 1, seq_len, seq_len + past_len, dtype = torch.float16, device = devs[0])
 
         buffer.attn_mask = attn_mask
 

@@ -4,18 +4,45 @@ from torch.cuda.amp import custom_bwd, custom_fwd
 from torch.utils.cpp_extension import load
 import os
 import sys
-
-# TODO: This is a kludge to make the C++ extension load when the library is imported elsewhere. May not be needed
-# with the package installed, if so maybe find better solution.
+import platform
 
 library_dir = os.path.dirname(os.path.abspath(__file__))
 extension_name = "exllama_ext"
+verbose = False
+
+# another kludge to get things compiling in Windows
+windows = os.name == "nt"
+if windows:
+    def find_msvc():
+        for msvc_dir in [a + "\\Microsoft Visual Studio\\" + b + "\\" + c + "\\VC\Tools\\MSVC\\"
+            for b in ["2022", "2019", "2017"]
+            for a in [os.environ["ProgramW6432"], os.environ["ProgramFiles(x86)"]]
+            for c in ["BuildTools", "Community", "Professional", "Enterprise", "Preview"]
+        ]:
+            if not os.path.exists(msvc_dir):
+                continue
+            versions = sorted(os.listdir(msvc_dir), reverse=True)
+            for version in versions:
+                compiler_dir = msvc_dir + version + "\\bin\\Hostx64\\x64"
+                if os.path.exists(compiler_dir) and os.path.exists(compiler_dir + "\\cl.exe"):
+                    return compiler_dir
+        return None
+    
+    import subprocess
+    try:
+        subprocess.check_output(["where", "cl"])
+    except subprocess.CalledProcessError as e:
+        cl_path = find_msvc()
+        if cl_path:
+            print("Injected compiler path:", cl_path)
+            os.environ["path"] += ";" + cl_path
+        else:
+            print("Unable to find cl.exe; compilation will probably fail.")
 
 exllama_ext = load(
     name = extension_name,
     sources = [
         os.path.join(library_dir, "exllama_ext/exllama_ext.cpp"),
-
         os.path.join(library_dir, "exllama_ext/cuda_buffers.cu"),
         os.path.join(library_dir, "exllama_ext/cuda_func/q4_matrix.cu"),
         os.path.join(library_dir, "exllama_ext/cuda_func/q4_matmul.cu"),
@@ -23,13 +50,11 @@ exllama_ext = load(
         os.path.join(library_dir, "exllama_ext/cuda_func/rms_norm.cu"),
         os.path.join(library_dir, "exllama_ext/cuda_func/rope.cu"),
         os.path.join(library_dir, "exllama_ext/cuda_func/half_matmul.cu"),
-
         os.path.join(library_dir, "exllama_ext/cuda_func/q4_mlp.cu"),
-
         os.path.join(library_dir, "exllama_ext/cpu_func/rep_penalty.cpp")
-
     ],
-    # verbose = True,
+    verbose = verbose,
+    extra_ldflags = ["cublas.lib"] if windows else []
     # extra_cflags = ["-ftime-report", "-DTORCH_USE_CUDA_DSA"]
 )
 

@@ -68,7 +68,12 @@ SentenceTransformers)
   returns a JSON object in the form:
   ```typescript
   interface basiliskEmbedResult {
-      embedding: number[]
+      embedding: number[],
+
+      // the model used to compute the embedding
+      model: string,
+      // number of dimensions in the embedding
+      dimensions: number
   }
   ```
 

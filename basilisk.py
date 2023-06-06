@@ -149,6 +149,7 @@ def post_embed():
 
     return {
         "embedding": embedding,
+        "model": args.embedding_model,
         "dimensions": len(embedding)
     }
 

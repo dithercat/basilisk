@@ -9,6 +9,8 @@
 #include "cpu_func/rep_penalty.h"
 
 #include "util.cuh"
+#include "tuning.h"
+
 #include "cuda_buffers.cuh"
 #include "cuda_func/q4_matrix.cuh"
 #include "cuda_func/q4_matmul.cuh"
@@ -77,6 +79,33 @@ int get_groupsize(torch::Tensor w, torch::Tensor w_zeros)
     return groupsize;
 }
 
+
+// Tuning parameters
+
+ExLlamaTuning tuningParams;
+
+void set_tuning_params
+(
+    int matmul_recons_thd,
+    int fused_mlp_thd,
+    int sdp_thd,
+    bool matmul_fused_remap,
+    bool rmsnorm_no_half2,
+    bool rope_no_half2,
+    bool matmul_no_half2,
+    bool silu_no_half2
+)
+{
+    tuningParams.matmul_recons_thd = matmul_recons_thd;
+    tuningParams.fused_mlp_thd = fused_mlp_thd;
+    tuningParams.sdp_thd = sdp_thd;
+    tuningParams.matmul_fused_remap = matmul_fused_remap;
+
+    tuningParams.rmsnorm_no_half2 = rmsnorm_no_half2;
+    tuningParams.rope_no_half2 = rope_no_half2;
+    tuningParams.matmul_no_half2 = matmul_no_half2;
+    tuningParams.silu_no_half2 = silu_no_half2;
+}
 
 // Prepare buffers for forward pass
 
@@ -152,8 +181,7 @@ void q4_matmul
 (
     torch::Tensor x,
     uintptr_t w,
-    torch::Tensor out,
-    int recons_thd  // min rows to reconstruct, 0 = never reconstruct
+    torch::Tensor out
 )
 {
     Q4Matrix* wm = reinterpret_cast<Q4Matrix*> (w);
@@ -167,10 +195,11 @@ void q4_matmul
 
     int x_height = x.size(0);
 
-    if (recons_thd == 0 || x_height < recons_thd)
+    if (tuningParams.matmul_recons_thd == 0 || x_height < tuningParams.matmul_recons_thd)
     {
         q4_matmul_cuda
         (
+            &tuningParams,
             (half*) x.data_ptr(),
             x_height,
             wm,
@@ -181,6 +210,7 @@ void q4_matmul
     {
         q4_matmul_recons_cuda
         (
+            &tuningParams,
             (half*) x.data_ptr(),
             x_height,
             wm,
@@ -283,12 +313,11 @@ void half_matmul_cublas
     );
 }
 
-// Llama MLP. Unfinished. Works on all models but is still 5% slower than regular MLP with quantized layers
+// Llama MLP. Works on all models but is still 5% slower than regular MLP with quantized layers
 
 void q4_mlp
 (
     torch::Tensor x,                // shape == (height, dim)
-    torch::Tensor out,              // shape == (height, dim)
 
     torch::Tensor rms_norm_weight,  // shape == (x.shape[1],) == (dim,)
     float epsilon,
@@ -311,8 +340,8 @@ void q4_mlp
 
     q4_mlp_cuda
     (
+        &tuningParams,
         (half*) x.data_ptr(),
-        (half*) out.data_ptr(),
         (half*) rms_norm_weight.data_ptr(),
         epsilon,
         reinterpret_cast<Q4Matrix*>(gate),
@@ -352,6 +381,7 @@ void rms_norm
 
     rms_norm_cuda
     (
+        &tuningParams,
         (half*) x.data_ptr(),
         (half*) w.data_ptr(),
         (half*) out.data_ptr(),
@@ -386,6 +416,7 @@ void rope_
 
     rope_cuda
     (
+        &tuningParams,
         (half*) x.data_ptr(),
         (half*) sin.data_ptr(),
         (half*) cos.data_ptr(),
@@ -427,7 +458,8 @@ void rep_penalty
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
-    m.def("prepare_buffers", &prepare_buffers, "prepare buffers");
+    m.def("set_tuning_params", &set_tuning_params, "set_tuning_params");
+    m.def("prepare_buffers", &prepare_buffers, "prepare_buffers");
     m.def("make_q4", &make_q4, "make_q4");
     m.def("q4_matmul", &q4_matmul, "q4_matmul");
     m.def("q4_mlp", &q4_mlp, "q4_mlp");

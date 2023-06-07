@@ -289,13 +289,10 @@ def post_infer():
     # clean up stopping strings
     # this sucks
     for string in body["stopping_strings"]:
-        for j in range(len(string) - 1, 0, -1):
-            if text[-j:] == string[:j]:
-                text = text[:-j]
-                break
-        else:
-            continue
-        break
+        l = len(string)
+        if string == text[-l:]:
+            text = text[:-l]
+            break
     
     print("generated {length} tokens".format(length=len(tokens.tolist())))
 

@@ -5,5 +5,5 @@
 
     "embedding_model": "all-MiniLM-L6-v2",
 
-    "shared_secret": "PLEASE CHANGE ME"
+    "shared_secret": null
 }

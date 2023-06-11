@@ -77,6 +77,7 @@ class ExLlamaConfig:
         self.rope_no_half2 = False
         self.matmul_no_half2 = False
         self.silu_no_half2 = False
+        self.concurrent_streams = False
 
     # Copy tuning params to C++ extension
 
@@ -89,7 +90,8 @@ class ExLlamaConfig:
                                                self.rmsnorm_no_half2,
                                                self.rope_no_half2,
                                                self.matmul_no_half2,
-                                               self.silu_no_half2)
+                                               self.silu_no_half2,
+                                               self.concurrent_streams)
 
     # Parse and set list of GPU VRAM allocations
 
@@ -116,7 +118,7 @@ class Ex4bitLinear:
         self.g_idx = tensors[key + ".g_idx"].cpu() if key + ".g_idx" in tensors else None
         self.bias = tensors[key + ".bias"] if has_bias else None
 
-        if (self.g_idx == 0).all():
+        if self.g_idx is not None and (self.g_idx == 0).all():
             self.config.empty_g_idx = True
             self.g_idx = None
 
@@ -702,6 +704,10 @@ class ExLlama:
                                                  temp_mlp,
                                                  temp_zeros_float,
                                                  temp_dq)
+
+        # Clear the cache
+
+        torch.cuda.empty_cache()
 
 
     def forward(self, input_ids, cache, last_id_only = True, preprocess_only = False):

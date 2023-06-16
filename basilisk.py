@@ -176,6 +176,11 @@ def post_tokens():
         "fragments": frags
     }
 
+STOP_UNKNOWN = -1
+STOP_LIMIT = 0
+STOP_EOS = 1
+STOP_ENDSTR = 2
+
 # actual inference endpoint
 # param names are kind of sort of compatible with text-generation-webui
 @app.route("/basilisk/infer", methods=["POST"])
@@ -235,6 +240,8 @@ def post_infer():
     print("context: {length}, limit: {limit}".format(limit=body["max_new_tokens"], length=len(idsl)))
     if len(idsl) + body["max_new_tokens"] >= 2048:
         return err("prompt length and generation limit must be less than 2048", 400)
+    
+    stop_reason = STOP_LIMIT
 
     # begin inference
     ids = torch.tensor([idsl])
@@ -276,15 +283,22 @@ def post_infer():
             if found:
                 stophit = True
         if stophit:
+            stop_reason = STOP_ENDSTR
             break
 
         # If token is EOS, replace it with newline before continuing
         if token.item() == tokenizer.eos_token_id:
             generator.replace_last_token(tokenizer.newline_token_id)
+            stop_reason = STOP_EOS
             break
     
     tokens = generator.sequence[0][initial_len:]
     text = tokenizer.decode(tokens)
+
+    # get fragments
+    frags = []
+    for id in tokens.tolist():
+        frags.append(tokenizer.tokenizer.Decode([colon_tok, id])[1:])
 
     # clean up stopping strings
     # this sucks
@@ -298,7 +312,9 @@ def post_infer():
 
     return {
         "text": text,
-        "tokens": tokens.tolist()
+        "tokens": tokens.tolist(),
+        "fragments": frags,
+        "stop_reason": stop_reason
     }
 
 print("starting flask...")
